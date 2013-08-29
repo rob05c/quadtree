@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"math/rand"
+	"time"
 )
 
 type Point struct {
@@ -9,38 +12,42 @@ type Point struct {
 	Y float64
 }
 
+func (p *Point) String() string {
+	return "[" + strconv.FormatFloat(p.X, 'f', -1, 64) + "," + strconv.FormatFloat(p.Y, 'f', -1, 64) + "]"
+}
+
 type BoundingBox struct {
 	Center        Point
 	HalfDimension Point
 }
 
-func (b BoundingBox) Contains(p Point) bool {
+func (b *BoundingBox) Contains(p *Point) bool {
 	return p.X >= b.Center.X-b.HalfDimension.X &&
 		p.X <= b.Center.X+b.HalfDimension.X &&
 		p.Y >= b.Center.Y-b.HalfDimension.Y &&
 		p.Y <= b.Center.Y+b.HalfDimension.Y
 }
 
-func (b BoundingBox) Intersects(other BoundingBox) bool {
+func (b *BoundingBox) Intersects(other *BoundingBox) bool {
 	return b.Center.X+b.HalfDimension.X > other.Center.X-other.HalfDimension.X &&
 		b.Center.X-b.HalfDimension.X < other.Center.X+other.HalfDimension.X &&
 		b.Center.Y+b.HalfDimension.Y > other.Center.Y-other.HalfDimension.Y &&
 		b.Center.Y-b.HalfDimension.Y < other.Center.Y+other.HalfDimension.Y
 }
 
-const NodeCapacity = 4
+
 
 type Quadtree struct {
 	Boundary *BoundingBox
+	Points   []Point
 	Nw       *Quadtree
 	Ne       *Quadtree
 	Sw       *Quadtree
 	Se       *Quadtree
-	Points   []Point
 }
 
-func (q Quadtree) Insert(p Point) bool {
-	if !q.Boundary.Contains(p) {
+func (q *Quadtree) Insert(p Point) bool {
+	if !q.Boundary.Contains(&p) {
 		return false
 	}
 	if len(q.Points) < cap(q.Points) {
@@ -56,7 +63,7 @@ func (q Quadtree) Insert(p Point) bool {
 		q.Se.Insert(p)
 }
 
-func (q Quadtree) Subdivide() {
+func (q *Quadtree) Subdivide() {
 	q.Nw = &Quadtree{
 		Boundary: &BoundingBox{
 			Center: Point{
@@ -106,10 +113,63 @@ func (q Quadtree) Subdivide() {
 	q.Points = nil
 }
 
-func (q Quadtree) QueryRange(b BoundingBox) {
+func (q *Quadtree) QueryRange(b *BoundingBox) []Point {
+	var points []Point
+	if !q.Boundary.Intersects(b) {
+		return nil
+	}
+	for _, point := range q.Points {
+		if b.Contains(&point) {
+			points = append(points, point)
+		}
+	}
+	if q.Nw == nil {
+		return points
+	}
+	points = append(points, q.Nw.QueryRange(b)...)
+	points = append(points, q.Ne.QueryRange(b)...)
+	points = append(points, q.Sw.QueryRange(b)...)
+	points = append(points, q.Se.QueryRange(b)...)
+	return points
+}
 
+func NewQuadTree(b *BoundingBox, capacity int) *Quadtree {
+	return &Quadtree {
+		Boundary: b,
+		Points: make([]Point, 0, capacity),
+	}
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
 func main() {
-	fmt.Println("main")
+	nodeCapacity := 4
+	qt := NewQuadTree(&BoundingBox {
+		Center: Point { 100.0, 100.0 },
+		HalfDimension: Point { 50.0, 50.0,},
+	}, nodeCapacity)
+
+	pointsToInsert := 10000000
+	start := time.Now()
+	for i := 0; i != pointsToInsert; i++ {
+		p := Point{rand.Float64() * 100.0 + 50.0, rand.Float64() * 100.0 + 50.0}
+		if !qt.Insert(p) {
+		}
+	}
+	end := time.Now()
+	elapsed := end.Sub(start)
+	fmt.Println("inserted " + strconv.Itoa(pointsToInsert) + " points in " + elapsed.String() + ".")
+/*
+	qr := &BoundingBox {
+		Center: Point { 75.0, 75.0 },
+		HalfDimension: Point { 5.0, 5.0,},
+	}
+	points := qt.QueryRange(qr)
+	fmt.Println("found " + strconv.Itoa(len(points)) + " points")
+*/
+//	for _, point := range points {
+//		fmt.Println(point.String())
+//	}
 }
