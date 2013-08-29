@@ -1,3 +1,10 @@
+/*
+Package quadtree implements a quadtree
+
+Currently, it only stores points, not ancillary data. This could be trivially changed by adding another variable to the Point class, or changing the Quadtree struct to contain a map rather than slice of Points, or changing the Quadtree struct to contain a PointWrapper which contains a point and a data value. 
+
+quadtree is not currently safe for concurrent use.
+*/
 package quadtree
 
 import (
