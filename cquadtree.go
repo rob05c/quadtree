@@ -99,6 +99,7 @@ func (q *Quadtree) Insert(p *Point) bool {
 			// the CAS succeeded, our point was added, return success
 			return true
 		}
+		// debug
 //		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(newPoints.Length))
 		// if the working value changed underneath us, loop and try again
 	}
@@ -155,23 +156,21 @@ func (q *Quadtree) disperse() {
 			break
 		}
 		newPoints := *oldPoints
+		// debug
 		if newPoints.First == nil {
 			fmt.Println("nil first with " + strconv.Itoa(oldPoints.Length))
 		}
 		p := newPoints.First.Point
 		newPoints.First = newPoints.First.Next
 		newPoints.Length--
-//		fmt.Printf("disperse swapping CAS(%p, %p, %p)\n", q.Points, &oldPoints, &newPoints)
 		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if !ok {
+			// debug
 //			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(newPoints.Length))
 			continue
 		}
-//		fmt.Println("CAS disperse succeeded: len(points): " + strconv.Itoa(len(*newPoints)))
-//		fmt.Println("CAS disperse succeeded: len(points): " + strconv.Itoa(len(*newPoints)))
-//		fmt.Println("disperse inserting")
 		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
-		// @todo remove when quadtree is finished. Useful for debugging, but it slows things down
+		// debug
 		if !ok {
 			panic("quadtree contained a point outside boundary")
 		}
