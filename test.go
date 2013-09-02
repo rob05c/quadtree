@@ -16,7 +16,7 @@ func init() {
 
 func main() {
 	nodeCapacity := 4
-	qt := quadtree.NewQuadTree(&quadtree.BoundingBox{
+	qt := quadtree.New(&quadtree.BoundingBox{
 		Center:        quadtree.Point{100.0, 100.0},
 		HalfDimension: quadtree.Point{50.0, 50.0},
 	}, nodeCapacity)
@@ -50,13 +50,13 @@ func main() {
 
 	found := 0
 	start = time.Now()
-	qr := &quadtree.BoundingBox {
+	box := &quadtree.BoundingBox {
 		Center: quadtree.Point { 100.0, 100.0 },
 		HalfDimension: quadtree.Point { 5.0, 5.0,},
 	}
 	for i := 0; i != queries; i++ {
-		qr.Center = quadtree.Point{rand.Float64()*100.0 + 50.0, rand.Float64()*100.0 + 50.0}
-		points := qt.QueryRange(qr)
+		box.Center = quadtree.Point{rand.Float64()*100.0 + 50.0, rand.Float64()*100.0 + 50.0}
+		points := qt.Query(box)
 		found += len(points)
 	}
 //	fmt.Println("found " + strconv.Itoa(len(points)) + " points")

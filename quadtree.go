@@ -1,9 +1,8 @@
 /*
-Package quadtree implements a quadtree
+Package quadtree implements a threadsafe lock-free quadtree
 
-Currently, it only stores points, not ancillary data. This could be trivially changed by adding another variable to the Point class, or changing the Quadtree struct to contain a map rather than slice of Points, or changing the Quadtree struct to contain a PointWrapper which contains a point and a data value. 
-
-quadtree is not currently safe for concurrent use.
+Currently, it only stores points, not ancillary data. 
+This could be trivially changed by adding a variable to PointListNode.
 */
 package quadtree
 
@@ -14,59 +13,6 @@ import (
 	"sync/atomic"
 )
 
-type Point struct {
-	X float64
-	Y float64
-}
-
-func (p *Point) String() string {
-	return "[" + strconv.FormatFloat(p.X, 'f', -1, 64) + "," + strconv.FormatFloat(p.Y, 'f', -1, 64) + "]"
-}
-
-type BoundingBox struct {
-	Center        Point
-	HalfDimension Point
-}
-
-func (b *BoundingBox) Contains(p *Point) bool {
-	return p.X >= b.Center.X-b.HalfDimension.X &&
-		p.X <= b.Center.X+b.HalfDimension.X &&
-		p.Y >= b.Center.Y-b.HalfDimension.Y &&
-		p.Y <= b.Center.Y+b.HalfDimension.Y
-}
-
-func (b *BoundingBox) Intersects(other *BoundingBox) bool {
-	return b.Center.X+b.HalfDimension.X > other.Center.X-other.HalfDimension.X &&
-		b.Center.X-b.HalfDimension.X < other.Center.X+other.HalfDimension.X &&
-		b.Center.Y+b.HalfDimension.Y > other.Center.Y-other.HalfDimension.Y &&
-		b.Center.Y-b.HalfDimension.Y < other.Center.Y+other.HalfDimension.Y
-}
-
-type PointListNode struct {
-	*Point
-	Next *PointListNode
-}
-
-func NewPointListNode(point *Point, next *PointListNode) *PointListNode {
-	return &PointListNode {
-		Point: point,
-		Next: next,
-	}
-}
-
-type PointList struct {
-	First *PointListNode
-	Capacity int
-	Length int // this is a cache for speed; it could be calculated from the PointsList
-}
-
-func NewPointList(capacity int) *PointList {
-	return &PointList {
-		First: nil,
-		Capacity: capacity,
-	}
-}
-
 type Quadtree struct {
 	Boundary *BoundingBox
 	Points   *PointList
@@ -74,6 +20,13 @@ type Quadtree struct {
 	Ne       *Quadtree
 	Sw       *Quadtree
 	Se       *Quadtree
+}
+
+func New(b *BoundingBox, capacity int) *Quadtree {
+	return &Quadtree {
+		Boundary: b,
+		Points: NewPointList(capacity),
+	}
 }
 
 func (q *Quadtree) Insert(p *Point) bool {
@@ -121,7 +74,37 @@ func (q *Quadtree) Insert(p *Point) bool {
 		q.Se.Insert(p)
 }
 
-// helper function of Quadtree.insert()
+func (q *Quadtree) Query(b *BoundingBox) []Point {
+	var points []Point
+	if !q.Boundary.Intersects(b) {
+		return nil
+	}
+	// this is important. It prevents the loop from segfaulting if a concurrent thread causes a split on this qt
+	// note this is safe because q.Points is only ever set atomically. If it were not, this would be unsafe for concurrent use
+	qPoints := q.Points
+	if qPoints != nil {
+		for node := qPoints.First; node != nil; node = node.Next {
+			if b.Contains(node.Point) {
+				points = append(points, *node.Point)
+			}
+		}
+	}
+	if q.Nw != nil {
+		points = append(points, q.Nw.Query(b)...)
+	}
+	if q.Ne != nil {
+		points = append(points, q.Ne.Query(b)...)
+	}
+	if q.Sw != nil {
+		points = append(points, q.Sw.Query(b)...)
+	}
+	if q.Se != nil {
+		points = append(points, q.Se.Query(b)...)
+	}
+	return points
+}
+
+// helper function of Insert()
 // subdivides the tree into quadrants. 
 // This should be called when the capacity is exceeded.
 func (q *Quadtree) subdivide() {
@@ -145,7 +128,7 @@ func (q *Quadtree) subdivide() {
 	}
 }
 
-// helper function for Quadtree.subdivide()
+// helper function for subdivide()
 //
 // places all points in the tree in the appropriate quadrant, 
 // and clears the points of this tree.
@@ -176,19 +159,6 @@ func (q *Quadtree) disperse() {
 		}
 	}
 	q.Points = nil
-}
-
-
-// helper function for Quadtree.createDir() functions
-// creates a quadrant of the current Quadtree, with the given center
-func (q *Quadtree) createQuadrant(center Point) *Quadtree {
-	return &Quadtree{
-		Boundary: &BoundingBox{
-			Center: center,
-			HalfDimension: Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0},
-		},
-		Points: NewPointList(q.Points.Capacity),
-	}
 }
 
 // helper function for Quadtree.subdivide()
@@ -239,38 +209,14 @@ func (q *Quadtree) createSe() {
 	atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Se)), nil, unsafe.Pointer(quadrant))
 }
 
-func (q *Quadtree) QueryRange(b *BoundingBox) []Point {
-	var points []Point
-	if !q.Boundary.Intersects(b) {
-		return nil
-	}
-	qPoints := q.Points // this is important. It prevents the loop from segfaulting if a concurrent thread causes a split on this qt
-	if qPoints != nil {
-		for node := qPoints.First; node != nil; node = node.Next {
-			if b.Contains(node.Point) {
-				points = append(points, *node.Point)
-			}
-		}
-	}
-	if q.Nw != nil {
-		points = append(points, q.Nw.QueryRange(b)...)
-	}
-	if q.Ne != nil {
-		points = append(points, q.Ne.QueryRange(b)...)
-	}
-	if q.Sw != nil {
-		points = append(points, q.Sw.QueryRange(b)...)
-	}
-	if q.Se != nil {
-		points = append(points, q.Se.QueryRange(b)...)
-	}
-	return points
-}
-
-func NewQuadTree(b *BoundingBox, capacity int) *Quadtree {
-	return &Quadtree {
-		Boundary: b,
-		Points: NewPointList(capacity),
+// helper function for Quadtree.createDir() functions
+// creates a quadrant of the current Quadtree, with the given center
+func (q *Quadtree) createQuadrant(center Point) *Quadtree {
+	return &Quadtree{
+		Boundary: &BoundingBox{
+			Center: center,
+			HalfDimension: Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0},
+		},
+		Points: NewPointList(q.Points.Capacity),
 	}
 }
-
