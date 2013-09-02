@@ -66,15 +66,13 @@ func (q *Quadtree) Insert(p Point) bool {
 			break
 		}
 		newPoints := append(*oldPoints, p)
-//		sw := unsafe.Pointer(q.Points)
 		// if the working value is the same, set the new slice with our point
-		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(q.Points), unsafe.Pointer(&newPoints))
+		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if ok {
-
 			// the CAS succeeded, our point was added, return success
 			return true
 		}
-		fmt.Println("CAS failed: len(points): " + strconv.Itoa(len(newPoints)))
+		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(len(newPoints)))
 		// if the working value changed underneath us, loop and try again
 	}
 
@@ -97,11 +95,24 @@ func (q *Quadtree) Insert(p Point) bool {
 // subdivides the tree into quadrants. 
 // This should be called when the capacity is exceeded.
 func (q *Quadtree) subdivide() {
-	q.createNw()
-	q.createNe()
-	q.createSw()
-	q.createSe()
-	q.disperse()
+	if *q.Points == nil {
+		return
+	}
+	if q.Nw == nil {
+		q.createNw()
+	}
+	if q.Ne == nil {
+		q.createNe()
+	}
+	if q.Sw == nil {
+		q.createSw()
+	}
+	if q.Se == nil {
+		q.createSe()
+	}
+	if *q.Points != nil {
+		q.disperse()
+	}
 }
 
 // helper function for Quadtree.subdivide()
@@ -123,6 +134,7 @@ func (q *Quadtree) disperse() {
 		}
 		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(newPoints))
 		if !ok {
+			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(len(*newPoints)))
 			continue
 		}
 		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
