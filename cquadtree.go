@@ -42,37 +42,64 @@ func (b *BoundingBox) Intersects(other *BoundingBox) bool {
 		b.Center.Y-b.HalfDimension.Y < other.Center.Y+other.HalfDimension.Y
 }
 
+type PointListNode struct {
+	*Point
+	Next *PointListNode
+}
+
+func NewPointListNode(point *Point, next *PointListNode) *PointListNode {
+	return &PointListNode {
+		Point: point,
+		Next: next,
+	}
+}
+
+type PointList struct {
+	First *PointListNode
+	Capacity int
+	Length int // this is a cache for speed; it could be calculated from the PointsList
+}
+
+func NewPointList(capacity int) *PointList {
+	return &PointList {
+		First: nil,
+		Capacity: capacity,
+	}
+}
+
 type Quadtree struct {
 	Boundary *BoundingBox
-	Points   *[]Point
+	Points   *PointList
 	Nw       *Quadtree
 	Ne       *Quadtree
 	Sw       *Quadtree
 	Se       *Quadtree
 }
 
-func (q *Quadtree) Insert(p Point) bool {
+func (q *Quadtree) Insert(p *Point) bool {
 	// we don't need to check the boundary within the CAS loop, because it can't change.
 	// if the quadtree were changed to allow changing the Boundary, this would no longer be threadsafe.
-	if !q.Boundary.Contains(&p) {
+	if !q.Boundary.Contains(p) {
+//		fmt.Println("insert outside boundary")
 		return false
 	}
-
 	for {
 		// the value we start working with
 		oldPoints := q.Points
 		// if at any point in our attempts to add the point, the length becomes the capacity, break so we can subdivide if necessary and add to a subtree
-		if len(*oldPoints) >= cap(*oldPoints) {
+		if oldPoints == nil || oldPoints.Length >= oldPoints.Capacity {
 			break
 		}
-		newPoints := append(*oldPoints, p)
+		newPoints := *oldPoints
+		newPoints.First = NewPointListNode(p, newPoints.First)
+		newPoints.Length++
 		// if the working value is the same, set the new slice with our point
 		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if ok {
 			// the CAS succeeded, our point was added, return success
 			return true
 		}
-		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(len(newPoints)))
+//		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(newPoints.Length))
 		// if the working value changed underneath us, loop and try again
 	}
 
@@ -82,7 +109,9 @@ func (q *Quadtree) Insert(p Point) bool {
 	// at this point, with the above CAS, even if we simply mutex the Subdivide(), we will have achieved amortized lock-free time.
 
 	// subdivide is threadsafe. The function itself does CAS
-	q.subdivide()
+	if q.Points != nil {
+		q.subdivide()
+	}
 
 	// These inserts are themselves threadsafe. Therefore, we don't need to do any special CAS work here.
 	return q.Nw.Insert(p) ||
@@ -95,7 +124,7 @@ func (q *Quadtree) Insert(p Point) bool {
 // subdivides the tree into quadrants. 
 // This should be called when the capacity is exceeded.
 func (q *Quadtree) subdivide() {
-	if *q.Points == nil {
+	if q.Points == nil {
 		return
 	}
 	if q.Nw == nil {
@@ -110,7 +139,7 @@ func (q *Quadtree) subdivide() {
 	if q.Se == nil {
 		q.createSe()
 	}
-	if *q.Points != nil {
+	if q.Points != nil {
 		q.disperse()
 	}
 }
@@ -122,41 +151,44 @@ func (q *Quadtree) subdivide() {
 func (q *Quadtree) disperse() {
 	for {
 		oldPoints := q.Points
-		if len(*oldPoints) == 0 {
+		if oldPoints == nil || oldPoints.Length == 0 {
 			break
 		}
-		p := (*oldPoints)[0]
-		newPoints := oldPoints
-		if len(*oldPoints) == 1 {
-			*newPoints = nil
-		} else {
-			*newPoints = (*oldPoints)[1:]
+		newPoints := *oldPoints
+		if newPoints.First == nil {
+			fmt.Println("nil first with " + strconv.Itoa(oldPoints.Length))
 		}
-		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(newPoints))
+		p := newPoints.First.Point
+		newPoints.First = newPoints.First.Next
+		newPoints.Length--
+//		fmt.Printf("disperse swapping CAS(%p, %p, %p)\n", q.Points, &oldPoints, &newPoints)
+		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if !ok {
-			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(len(*newPoints)))
+//			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(newPoints.Length))
 			continue
 		}
+//		fmt.Println("CAS disperse succeeded: len(points): " + strconv.Itoa(len(*newPoints)))
+//		fmt.Println("CAS disperse succeeded: len(points): " + strconv.Itoa(len(*newPoints)))
+//		fmt.Println("disperse inserting")
 		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
 		// @todo remove when quadtree is finished. Useful for debugging, but it slows things down
 		if !ok {
 			panic("quadtree contained a point outside boundary")
 		}
 	}
-	*q.Points = nil
+	q.Points = nil
 }
 
 
 // helper function for Quadtree.createDir() functions
 // creates a quadrant of the current Quadtree, with the given center
 func (q *Quadtree) createQuadrant(center Point) *Quadtree {
-	points := make([]Point, 0, cap(*q.Points))
 	return &Quadtree{
 		Boundary: &BoundingBox{
 			Center: center,
 			HalfDimension: Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0},
 		},
-		Points: &points,
+		Points: NewPointList(q.Points.Capacity),
 	}
 }
 
@@ -213,9 +245,12 @@ func (q *Quadtree) QueryRange(b *BoundingBox) []Point {
 	if !q.Boundary.Intersects(b) {
 		return nil
 	}
-	for _, point := range *q.Points {
-		if b.Contains(&point) {
-			points = append(points, point)
+	qPoints := q.Points // this is important. It prevents the loop from segfaulting if a concurrent thread causes a split on this qt
+	if qPoints != nil {
+		for node := qPoints.First; node != nil; node = node.Next {
+			if b.Contains(node.Point) {
+				points = append(points, *node.Point)
+			}
 		}
 	}
 	if q.Nw != nil {
@@ -234,13 +269,9 @@ func (q *Quadtree) QueryRange(b *BoundingBox) []Point {
 }
 
 func NewQuadTree(b *BoundingBox, capacity int) *Quadtree {
-	points := make([]Point, 0, capacity)
 	return &Quadtree {
 		Boundary: b,
-		Points: &points,
-//		Nw: &Quadtree{},
-//		Ne: &Quadtree{},
-//		Sw: &Quadtree{},
-//		Se: &Quadtree{},
+		Points: NewPointList(capacity),
 	}
 }
+
