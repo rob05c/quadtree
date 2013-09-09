@@ -158,7 +158,9 @@ func (q *Quadtree) disperse() {
 			panic("quadtree contained a point outside boundary")
 		}
 	}
-	q.Points = nil
+	// we don't need to compare. We know it needs set at nil now; if someone else set it first, setting again doesn't hurt.
+	// this does need to be atomic, however. Else, Query() might read a pointer which was half-set to nil
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), nil)
 }
 
 // helper function for Quadtree.subdivide()
