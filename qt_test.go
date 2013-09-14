@@ -1,10 +1,10 @@
 package quadtree
 
 import (
-	"time"
-	"runtime"
 	"math/rand"
+	"runtime"
 	"testing"
+	"time"
 )
 
 /// note the number of points inserted is only approximately points
@@ -30,7 +30,7 @@ func testInsert(points int, threads int) (inserted int, tree *Quadtree) {
 		go insertPoint()
 	}
 	for i := 0; i != threads; i++ {
-		<- done
+		<-done
 	}
 	return tpoints * threads, qt
 }

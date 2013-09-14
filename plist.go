@@ -6,21 +6,21 @@ type PointListNode struct {
 }
 
 func NewPointListNode(point *Point, next *PointListNode) *PointListNode {
-	return &PointListNode {
+	return &PointListNode{
 		Point: point,
-		Next: next,
+		Next:  next,
 	}
 }
 
 type PointList struct {
-	First *PointListNode
+	First    *PointListNode
 	Capacity int
-	Length int // this is a cache for speed; it could be calculated from the PointsList
+	Length   int // this is a cache for speed; it could be calculated from the PointsList
 }
 
 func NewPointList(capacity int) *PointList {
-	return &PointList {
-		First: nil,
+	return &PointList{
+		First:    nil,
 		Capacity: capacity,
 	}
 }

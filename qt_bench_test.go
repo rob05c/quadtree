@@ -1,10 +1,10 @@
 package quadtree
 
 import (
-	"time"
-	"runtime"
 	"math/rand"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func benchInsert(b *testing.B) *Quadtree {
@@ -38,7 +38,7 @@ func benchInsert(b *testing.B) *Quadtree {
 		go insertPoint()
 	}
 	for i := 0; i != threads; i++ {
-		<- done
+		<-done
 	}
 	return qt
 }
@@ -51,9 +51,9 @@ func BenchmarkQuery(b *testing.B) {
 	b.StopTimer()
 	qt := benchInsert(b)
 	queries := b.N
-	box := &BoundingBox {
-		Center: Point { 100.0, 100.0 },
-		HalfDimension: Point { 5.0, 5.0,},
+	box := &BoundingBox{
+		Center:        Point{100.0, 100.0},
+		HalfDimension: Point{5.0, 5.0},
 	}
 	b.StartTimer()
 	b.ResetTimer()

@@ -1,7 +1,7 @@
 /*
 Package quadtree implements a threadsafe lock-free quadtree
 
-Currently, it only stores points, not ancillary data. 
+Currently, it only stores points, not ancillary data.
 This could be trivially changed by adding a variable to PointListNode.
 */
 package quadtree
@@ -9,8 +9,8 @@ package quadtree
 import (
 	"fmt"
 	"strconv"
-	"unsafe"
 	"sync/atomic"
+	"unsafe"
 )
 
 type Quadtree struct {
@@ -23,9 +23,9 @@ type Quadtree struct {
 }
 
 func New(b *BoundingBox, capacity int) *Quadtree {
-	return &Quadtree {
+	return &Quadtree{
 		Boundary: b,
-		Points: NewPointList(capacity),
+		Points:   NewPointList(capacity),
 	}
 }
 
@@ -33,7 +33,7 @@ func (q *Quadtree) Insert(p *Point) bool {
 	// we don't need to check the boundary within the CAS loop, because it can't change.
 	// if the quadtree were changed to allow changing the Boundary, this would no longer be threadsafe.
 	if !q.Boundary.Contains(p) {
-//		fmt.Println("insert outside boundary")
+		//		fmt.Println("insert outside boundary")
 		return false
 	}
 	for {
@@ -53,11 +53,11 @@ func (q *Quadtree) Insert(p *Point) bool {
 			return true
 		}
 		// debug
-//		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(newPoints.Length))
+		//		fmt.Println("CAS Insert failed: len(points): " + strconv.Itoa(newPoints.Length))
 		// if the working value changed underneath us, loop and try again
 	}
 
-	// If we get here, we broke the loop because the length exceeds the capacity. 
+	// If we get here, we broke the loop because the length exceeds the capacity.
 	// We must now Subdivide if necessary, and add the point to the proper subtree
 
 	// at this point, with the above CAS, even if we simply mutex the Subdivide(), we will have achieved amortized lock-free time.
@@ -105,7 +105,7 @@ func (q *Quadtree) Query(b *BoundingBox) []Point {
 }
 
 // helper function of Insert()
-// subdivides the tree into quadrants. 
+// subdivides the tree into quadrants.
 // This should be called when the capacity is exceeded.
 func (q *Quadtree) subdivide() {
 	if q.Points == nil {
@@ -130,7 +130,7 @@ func (q *Quadtree) subdivide() {
 
 // helper function for subdivide()
 //
-// places all points in the tree in the appropriate quadrant, 
+// places all points in the tree in the appropriate quadrant,
 // and clears the points of this tree.
 func (q *Quadtree) disperse() {
 	for {
@@ -149,7 +149,7 @@ func (q *Quadtree) disperse() {
 		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if !ok {
 			// debug
-//			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(newPoints.Length))
+			//			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(newPoints.Length))
 			continue
 		}
 		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
@@ -214,10 +214,10 @@ func (q *Quadtree) createSe() {
 // helper function for Quadtree.createDir() functions
 // creates a quadrant of the current Quadtree, with the given center
 func (q *Quadtree) createQuadrant(center Point) *Quadtree {
-     //@todo fix this to be threadsafe. Currently it references q.Points, which may be nil
+	//@todo fix this to be threadsafe. Currently it references q.Points, which may be nil
 	return &Quadtree{
 		Boundary: &BoundingBox{
-			Center: center,
+			Center:        center,
 			HalfDimension: Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0},
 		},
 		Points: NewPointList(q.Points.Capacity),
