@@ -13,14 +13,7 @@ func NewPointListNode(point *Point, next *PointListNode) *PointListNode {
 }
 
 type PointList struct {
-	First    *PointListNode
 	Capacity int
+	First    *PointListNode
 	Length   int // this is a cache for speed; it could be calculated from the PointsList
-}
-
-func NewPointList(capacity int) *PointList {
-	return &PointList{
-		First:    nil,
-		Capacity: capacity,
-	}
 }

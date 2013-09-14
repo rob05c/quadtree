@@ -22,11 +22,8 @@ type Quadtree struct {
 	Se       *Quadtree
 }
 
-func New(b *BoundingBox, capacity int) *Quadtree {
-	return &Quadtree{
-		Boundary: b,
-		Points:   NewPointList(capacity),
-	}
+func New(boundingBox *BoundingBox, capacity int) *Quadtree {
+	return &Quadtree{Boundary: boundingBox, Points: &PointList{Capacity: capacity}}
 }
 
 func (q *Quadtree) Insert(p *Point) bool {
@@ -163,63 +160,35 @@ func (q *Quadtree) disperse() {
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), nil)
 }
 
-// helper function for Quadtree.subdivide()
-// creates the Nw quadrant of the tree
+// for the createDir funcs, we don't need to check the value of the CAS; if it fails, someone else succeeded, so we just continue
 func (q *Quadtree) createNw() {
-	center := Point{
-		X: q.Boundary.Center.X - q.Boundary.HalfDimension.X/2.0,
-		Y: q.Boundary.Center.Y - q.Boundary.HalfDimension.Y/2.0,
-	}
-	quadrant := q.createQuadrant(center)
-	// we don't need to check if the CAS fails - if it fails, someone else already created the quadrant
+	quadrant := q.createQuadrant(Point{q.Boundary.Center.X - q.Boundary.HalfDimension.X/2.0, q.Boundary.Center.Y - q.Boundary.HalfDimension.Y/2.0})
 	atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Nw)), nil, unsafe.Pointer(quadrant))
 }
 
-// helper function for Quadtree.subdivide()
-// creates the Ne quadrant of the tree
 func (q *Quadtree) createNe() {
-	center := Point{
-		X: q.Boundary.Center.X + q.Boundary.HalfDimension.X/2.0,
-		Y: q.Boundary.Center.Y - q.Boundary.HalfDimension.Y/2.0,
-	}
-	quadrant := q.createQuadrant(center)
-	// we don't need to check if the CAS fails - if it fails, someone else already created the quadrant
+	quadrant := q.createQuadrant(Point{q.Boundary.Center.X + q.Boundary.HalfDimension.X/2.0, q.Boundary.Center.Y - q.Boundary.HalfDimension.Y/2.0})
 	atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Ne)), nil, unsafe.Pointer(quadrant))
 }
 
-// helper function for Quadtree.subdivide()
-// creates the Sw quadrant of the tree
 func (q *Quadtree) createSw() {
-	center := Point{
-		X: q.Boundary.Center.X - q.Boundary.HalfDimension.X/2.0,
-		Y: q.Boundary.Center.Y + q.Boundary.HalfDimension.Y/2.0,
-	}
-	quadrant := q.createQuadrant(center)
-	// we don't need to check if the CAS fails - if it fails, someone else already created the quadrant
+	quadrant := q.createQuadrant(Point{q.Boundary.Center.X - q.Boundary.HalfDimension.X/2.0, q.Boundary.Center.Y + q.Boundary.HalfDimension.Y/2.0})
 	atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Sw)), nil, unsafe.Pointer(quadrant))
 }
 
-// helper function for Quadtree.subdivide()
-// creates the Se quadrant of the tree
 func (q *Quadtree) createSe() {
-	center := Point{
-		X: q.Boundary.Center.X + q.Boundary.HalfDimension.X/2.0,
-		Y: q.Boundary.Center.Y + q.Boundary.HalfDimension.Y/2.0,
-	}
-	quadrant := q.createQuadrant(center)
-	// we don't need to check if the CAS fails - if it fails, someone else already created the quadrant
+	quadrant := q.createQuadrant(Point{q.Boundary.Center.X + q.Boundary.HalfDimension.X/2.0, q.Boundary.Center.Y + q.Boundary.HalfDimension.Y/2.0})
 	atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Se)), nil, unsafe.Pointer(quadrant))
 }
 
-// helper function for Quadtree.createDir() functions
-// creates a quadrant of the current Quadtree, with the given center
 func (q *Quadtree) createQuadrant(center Point) *Quadtree {
-	//@todo fix this to be threadsafe. Currently it references q.Points, which may be nil
+	// this is important. Otherwise, q.Points could be changed by another thread
+	points := q.Points
+	if points == nil {
+		return nil // this is ok, because if q.Points became nil, the caller's CAS will fail
+	}
 	return &Quadtree{
-		Boundary: &BoundingBox{
-			Center:        center,
-			HalfDimension: Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0},
-		},
-		Points: NewPointList(q.Points.Capacity),
+		Boundary: &BoundingBox{center, Point{q.Boundary.HalfDimension.X / 2.0, q.Boundary.HalfDimension.Y / 2.0}},
+		Points:   &PointList{Capacity: points.Capacity},
 	}
 }
