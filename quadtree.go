@@ -214,6 +214,7 @@ func (q *Quadtree) createSe() {
 // helper function for Quadtree.createDir() functions
 // creates a quadrant of the current Quadtree, with the given center
 func (q *Quadtree) createQuadrant(center Point) *Quadtree {
+     //@todo fix this to be threadsafe. Currently it references q.Points, which may be nil
 	return &Quadtree{
 		Boundary: &BoundingBox{
 			Center: center,
