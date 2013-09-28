@@ -3,12 +3,13 @@ Package quadtree implements a threadsafe lock-free quadtree
 
 Currently, it only stores points, not ancillary data.
 This could be trivially changed by adding a variable to PointListNode.
+
+// @todo fix loads to use AtomicLoad. They are not threadsafe. It can be changed in the middle of a load
 */
 package quadtree
 
 import (
 	"fmt"
-	"strconv"
 	"sync/atomic"
 	"unsafe"
 )
@@ -33,13 +34,15 @@ func (q *Quadtree) Insert(p *Point) bool {
 		//		fmt.Println("insert outside boundary")
 		return false
 	}
+
 	for {
 		// the value we start working with
-		oldPoints := q.Points
+		oldPoints := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
 		// if at any point in our attempts to add the point, the length becomes the capacity, break so we can subdivide if necessary and add to a subtree
 		if oldPoints == nil || oldPoints.Length >= oldPoints.Capacity {
 			break
 		}
+
 		newPoints := *oldPoints
 		newPoints.First = NewPointListNode(p, newPoints.First)
 		newPoints.Length++
@@ -60,15 +63,17 @@ func (q *Quadtree) Insert(p *Point) bool {
 	// at this point, with the above CAS, even if we simply mutex the Subdivide(), we will have achieved amortized lock-free time.
 
 	// subdivide is threadsafe. The function itself does CAS
-	if q.Points != nil {
+	points := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
+	if points != nil {
 		q.subdivide()
 	}
 
 	// These inserts are themselves threadsafe. Therefore, we don't need to do any special CAS work here.
-	return q.Nw.Insert(p) ||
-		q.Ne.Insert(p) ||
-		q.Sw.Insert(p) ||
-		q.Se.Insert(p)
+	ok := q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
+	if !ok {
+		fmt.Println("insert failed")
+	}
+	return ok
 }
 
 func (q *Quadtree) Query(b *BoundingBox) []Point {
@@ -78,7 +83,7 @@ func (q *Quadtree) Query(b *BoundingBox) []Point {
 	}
 	// this is important. It prevents the loop from segfaulting if a concurrent thread causes a split on this qt
 	// note this is safe because q.Points is only ever set atomically. If it were not, this would be unsafe for concurrent use
-	qPoints := q.Points
+	qPoints := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
 	if qPoints != nil {
 		for node := qPoints.First; node != nil; node = node.Next {
 			if b.Contains(node.Point) {
@@ -105,23 +110,34 @@ func (q *Quadtree) Query(b *BoundingBox) []Point {
 // subdivides the tree into quadrants.
 // This should be called when the capacity is exceeded.
 func (q *Quadtree) subdivide() {
-	if q.Points == nil {
+	points := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
+	if points == nil {
 		return
 	}
-	if q.Nw == nil {
-		q.createNw()
+	q.createNw()
+	q.createNe()
+	q.createSw()
+	q.createSe()
+	q.disperse()
+}
+
+func (q *Quadtree) disperse() {
+	oldPoints := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
+	if oldPoints == nil {
+		return
 	}
-	if q.Ne == nil {
-		q.createNe()
+	ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), nil)
+	if !ok {
+		return // someone beat us to it
 	}
-	if q.Sw == nil {
-		q.createSw()
-	}
-	if q.Se == nil {
-		q.createSe()
-	}
-	if q.Points != nil {
-		q.disperse()
+	for oldPoints.First != nil {
+		p := oldPoints.First.Point
+		oldPoints.First = oldPoints.First.Next
+		oldPoints.Length--
+		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
+		if !ok {
+			panic("disperse point outside bounds")
+		}
 	}
 }
 
@@ -129,27 +145,22 @@ func (q *Quadtree) subdivide() {
 //
 // places all points in the tree in the appropriate quadrant,
 // and clears the points of this tree.
-func (q *Quadtree) disperse() {
+func (q *Quadtree) disperse2() {
 	for {
-		oldPoints := q.Points
+		oldPoints := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
 		if oldPoints == nil || oldPoints.Length == 0 {
 			break
 		}
 		newPoints := *oldPoints
-		// debug
-		if newPoints.First == nil {
-			fmt.Println("nil first with " + strconv.Itoa(oldPoints.Length))
-		}
-		p := newPoints.First.Point
+		p := *newPoints.First.Point
 		newPoints.First = newPoints.First.Next
 		newPoints.Length--
 		ok := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points)), unsafe.Pointer(oldPoints), unsafe.Pointer(&newPoints))
 		if !ok {
-			// debug
-			//			fmt.Println("CAS disperse failed: len(points): " + strconv.Itoa(newPoints.Length))
 			continue
 		}
-		ok = q.Nw.Insert(p) || q.Ne.Insert(p) || q.Sw.Insert(p) || q.Se.Insert(p)
+
+		ok = q.Nw.Insert(&p) || q.Ne.Insert(&p) || q.Sw.Insert(&p) || q.Se.Insert(&p)
 		// debug
 		if !ok {
 			panic("quadtree contained a point outside boundary")
@@ -183,7 +194,7 @@ func (q *Quadtree) createSe() {
 
 func (q *Quadtree) createQuadrant(center Point) *Quadtree {
 	// this is important. Otherwise, q.Points could be changed by another thread
-	points := q.Points
+	points := (*PointList)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.Points))))
 	if points == nil {
 		return nil // this is ok, because if q.Points became nil, the caller's CAS will fail
 	}

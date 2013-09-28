@@ -5,11 +5,12 @@ import (
 	"runtime"
 	"testing"
 	"time"
+	"strconv"
 )
 
 /// note the number of points inserted is only approximately points
 /// the actual number inserted is the closest power of threads
-func testInsert(points int, threads int) (inserted int, tree *Quadtree) {
+func testInsert(t *testing.T, points int, threads int) (inserted int, tree *Quadtree) {
 	runtime.GOMAXPROCS(threads / 4)
 	rand.Seed(time.Now().UnixNano())
 	nodeCapacity := 4
@@ -22,7 +23,10 @@ func testInsert(points int, threads int) (inserted int, tree *Quadtree) {
 	insertPoint := func() {
 		for i := 0; i != tpoints; i++ {
 			p := &Point{rand.Float64()*100.0 + 50.0, rand.Float64()*100.0 + 50.0}
-			qt.Insert(p)
+			if !qt.Insert(p) {
+				t.Log("insert failed")
+				t.FailNow()
+			}
 		}
 		done <- true
 	}
@@ -36,9 +40,10 @@ func testInsert(points int, threads int) (inserted int, tree *Quadtree) {
 }
 
 func TestInsertQuery(t *testing.T) {
-	inserted, qt := testInsert(100000, 100)
+	inserted, qt := testInsert(t, 1000000, 100)
 	queried := len(qt.Query(qt.Boundary))
 	if inserted != queried {
-		t.Fail()
+		t.Log("inserted " + strconv.Itoa(inserted) + " but queried " + strconv.Itoa(queried))
+		t.FailNow()
 	}
 }
